@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Sensor Tangan Visual ✊✋✌️ | Batu - Kertas - Gunting</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; user-select: none; }
+
+        body {
+            min-height: 100vh;
+            background: linear-gradient(145deg, #0a0f1e 0%, #0c1222 100%);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-family: 'Poppins', system-ui, sans-serif;
+            padding: 20px;
+            color: white;
+        }
+
+        .container {
+            max-width: 1000px;
+            width: 100%;
+            background: rgba(18, 25, 45, 0.65);
+            backdrop-filter: blur(8px);
+            border-radius: 3.5rem;
+            padding: 1.2rem;
+            box-shadow: 0 30px 45px rgba(0, 0, 0, 0.5);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+        }
+
+        .header { text-align: center; margin-bottom: 1rem; }
+        .header h1 {
+            font-size: 2rem;
+            background: linear-gradient(135deg, #FFFFFF, #B0C4FF);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .camera-box {
+            position: relative;
+            display: flex;
+            justify-content: center;
+            border-radius: 2rem;
+            overflow: hidden;
+            background: #000;
+            border: 1px solid rgba(255,255,240,0.25);
+        }
+
+        #video { width: 100%; max-width: 780px; transform: scaleX(-1); display: block; }
+        canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; transform: scaleX(-1); pointer-events: none; }
+
+        .result-panel {
+            margin-top: 1.8rem;
+            background: rgba(10, 20, 30, 0.7);
+            border-radius: 2.5rem;
+            padding: 1.5rem;
+            text-align: center;
+            border: 1px solid rgba(255,215,0,0.3);
+        }
+
+        .gesture-name {
+            font-size: 4rem;
+            font-weight: 800;
+            background: linear-gradient(125deg, #FFE6B0, #FFB347);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin: 10px 0;
+        }
+
+        .controls { display: flex; justify-content: center; gap: 12px; margin: 20px 0; flex-wrap: wrap; }
+        button {
+            background: #1e2d4b;
+            border: 1px solid rgba(255,255,200,0.2);
+            padding: 10px 25px;
+            border-radius: 60px;
+            color: white;
+            cursor: pointer;
+            font-weight: 600;
+            transition: 0.3s;
+        }
+        button:hover { background: #2c4780; transform: scale(1.05); }
+
+        .status-badge { background: #1b263b; padding: 8px 20px; border-radius: 90px; font-size: 0.8rem; }
+        .loading { position: absolute; bottom: 10px; left: 20px; font-size: 12px; color: #00ffcc; }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+</head>
+<body>
+
+<div class="container">
+    <div class="header">
+        <h1>✧ SENSOR TANGAN VISUAL ✧</h1>
+        <p>Gunakan Tangan Kanan untuk Suara AI</p>
+    </div>
+
+    <div class="camera-box">
+        <video id="video" playsinline></video>
+        <canvas id="output-canvas"></canvas>
+        <div class="loading" id="statusModel">🟡 Menyiapkan AI...</div>
+    </div>
+
+    <div class="result-panel">
+        <div style="letter-spacing: 2px; font-size: 0.8rem;">HASIL DETEKSI</div>
+        <div class="gesture-name" id="gestureDisplay">🤚 SIAP</div>
+        <div id="confidenceInfo" style="color: #7b8fb0; font-size: 0.9rem;">Aktifkan kamera untuk memulai</div>
+    </div>
+
+    <div class="controls">
+        <button id="startBtn">▶️ AKTIFKAN</button>
+        <button id="stopBtn">⏹️ MATIKAN</button>
+        <div class="status-badge" id="camStatus">⚫ Offline</div>
+    </div>
+</div>
+
+<script>
+    const videoElement = document.getElementById('video');
+    const canvasElement = document.getElementById('output-canvas');
+    const canvasCtx = canvasElement.getContext('2d');
+    const gestureDisplay = document.getElementById('gestureDisplay');
+    const confidenceInfo = document.getElementById('confidenceInfo');
+    const statusModel = document.getElementById('statusModel');
+
+    let hands = null;
+    let camera = null;
+    let lastSpoken = "";
+
+    // --- FUNGSI SUARA AI ---
+    function speak(text) {
+        if (text !== lastSpoken) {
+            window.speechSynthesis.cancel();
+            const msg = new SpeechSynthesisUtterance(text);
+            msg.lang = 'id-ID';
+            msg.rate = 1.1;
+            window.speechSynthesis.speak(msg);
+            lastSpoken = text;
+        }
+    }
+
+    // --- LOGIKA GESTURE ---
+    function getGesture(landmarks) {
+        const getDist = (p1, p2) => Math.hypot(p1.x - p2.x, p1.y - p2.y);
+        const handSize = getDist(landmarks[5], landmarks[17]);
+        const thresh = handSize * 0.4;
+
+        const f1 = getDist(landmarks[8], landmarks[5]) > thresh;  // Telunjuk
+        const f2 = getDist(landmarks[12], landmarks[9]) > thresh; // Tengah
+        const f3 = getDist(landmarks[16], landmarks[13]) > thresh; // Manis
+        const f4 = getDist(landmarks[20], landmarks[17]) > thresh; // Kelingking
+
+        if (f1 && f2 && f3 && f4) return "Kertas";
+        if (f1 && f2 && !f3 && !f4) return "Gunting";
+        if (!f1 && !f2 && !f3 && !f4) return "Batu";
+        return null;
+    }
+
+    function onResults(results) {
+        canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+        
+        if (results.multiHandLandmarks && results.multiHandedness) {
+            for (let i = 0; i < results.multiHandedness.length; i++) {
+                // HANYA PROSES TANGAN KANAN (label 'Right' di mirrored video)
+                if (results.multiHandedness[i].label === 'Right') {
+                    const landmarks = results.multiHandLandmarks[i];
+                    drawLandmarks(landmarks);
+                    
+                    const gesture = getGesture(landmarks);
+                    if (gesture) {
+                        gestureDisplay.innerText = gesture.toUpperCase();
+                        confidenceInfo.innerText = "✨ Gesture terdeteksi!";
+                        speak(gesture);
+                    }
+                    break;
+                }
+            }
+        } else {
+            lastSpoken = "";
+            gestureDisplay.innerText = "🤚 MENUNGGU";
+        }
+    }
+
+    function drawLandmarks(landmarks) {
+        canvasCtx.fillStyle = "#00ffcc";
+        canvasCtx.strokeStyle = "#ffffff";
+        canvasCtx.lineWidth = 2;
+        landmarks.forEach(p => {
+            canvasCtx.beginPath();
+            canvasCtx.arc(p.x * canvasElement.width, p.y * canvasElement.height, 4, 0, 2*Math.PI);
+            canvasCtx.fill();
+        });
+    }
+
+    // --- SETUP MEDIA ---
+    function init() {
+        hands = new Hands({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
+        hands.setOptions({maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.7, minTrackingConfidence: 0.7});
+        hands.onResults(onResults);
+        statusModel.innerText = "✅ AI Ready";
+    }
+
+    document.getElementById('startBtn').onclick = async () => {
+        if (!hands) init();
+        camera = new Camera(videoElement, {
+            onFrame: async () => {
+                canvasElement.width = videoElement.videoWidth;
+                canvasElement.height = videoElement.videoHeight;
+                await hands.send({image: videoElement});
+            },
+            width: 640, height: 480
+        });
+        camera.start();
+        document.getElementById('camStatus').innerText = "🟢 Online";
+    };
+
+    document.getElementById('stopBtn').onclick = () => {
+        if (camera) camera.stop();
+        document.getElementById('camStatus').innerText = "⚫ Offline";
+        gestureDisplay.innerText = "⏸️ MATI";
+    };
+
+    window.onload = init;
+</script>
+</body>
+</html>
